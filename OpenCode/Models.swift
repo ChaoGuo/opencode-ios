@@ -82,9 +82,13 @@ struct MessagePart: Codable, Equatable {
     var mime: String? = nil
     var filename: String? = nil
 
-    // Unique key for SwiftUI
+    // Stable identity for SwiftUI ForEach. Falls back to type+content hash so the
+    // same part never produces two different IDs across renders.
     var partID: String {
-        id ?? callID ?? url ?? UUID().uuidString
+        if let id = id { return id }
+        if let callID = callID { return callID }
+        if let url = url { return url }
+        return "\(type):\(text ?? "")\(filename ?? "")"
     }
 
     struct ToolState: Codable, Equatable {

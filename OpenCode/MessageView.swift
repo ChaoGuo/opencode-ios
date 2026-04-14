@@ -3,12 +3,33 @@ import UIKit
 import MarkdownUI
 
 // MARK: - MessageView
+
+// Server-push convention: a user-role message carrying a text part with this exact
+// content is rendered assistant-style. Backend sets `ignored: true` on that part so
+// it never enters LLM context.
+private let systemPushMarker = "[[__OPENCODE_SYSTEM_PUSH__]]"
+
+private extension MessageEnvelope {
+    var isSystemPush: Bool {
+        info.role == .user && parts.contains { $0.type == "text" && $0.text == systemPushMarker }
+    }
+
+    var withoutMarker: MessageEnvelope {
+        MessageEnvelope(
+            info: info,
+            parts: parts.filter { !($0.type == "text" && $0.text == systemPushMarker) }
+        )
+    }
+}
+
 struct MessageView: View {
     let envelope: MessageEnvelope
 
     var body: some View {
         Group {
-            if envelope.info.role == .user {
+            if envelope.isSystemPush {
+                AssistantMessageView(envelope: envelope.withoutMarker)
+            } else if envelope.info.role == .user {
                 UserMessageView(envelope: envelope)
             } else {
                 AssistantMessageView(envelope: envelope)
@@ -46,8 +67,8 @@ struct UserMessageView: View {
                 #endif
             } else {
                 VStack(alignment: .trailing, spacing: 6) {
-                    ForEach(imageParts.indices, id: \.self) { i in
-                        DataImageView(urlString: imageParts[i].url)
+                    ForEach(imageParts, id: \.partID) { part in
+                        DataImageView(urlString: part.url)
                             .frame(maxWidth: 220, maxHeight: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
@@ -85,8 +106,8 @@ struct AssistantMessageView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(envelope.parts.indices, id: \.self) { i in
-                    PartView(part: envelope.parts[i], reasoningExpanded: $reasoningExpanded)
+                ForEach(envelope.parts, id: \.partID) { part in
+                    PartView(part: part, reasoningExpanded: $reasoningExpanded)
                 }
 
                 if let info = envelope.info as MessageInfo?,
@@ -386,6 +407,7 @@ struct DataImageView: View {
     let urlString: String?
     @State private var uiImage: UIImage? = nil
     @State private var loaded = false
+    @State private var showPreview = false
 
     var body: some View {
         Group {
@@ -393,42 +415,131 @@ struct DataImageView: View {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
-            } else if let urlString, urlString.hasPrefix("http"),
-                      let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFit()
-                    case .failure: Image(systemName: "photo").foregroundStyle(.secondary)
-                    default: ProgressView()
-                    }
-                }
             } else if loaded {
                 Image(systemName: "photo").foregroundStyle(.secondary)
             } else {
                 ProgressView()
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if uiImage != nil { showPreview = true }
+        }
+        .fullScreenCover(isPresented: $showPreview) {
+            ImagePreviewView(uiImage: uiImage) {
+                showPreview = false
+            }
+        }
         .task(id: urlString) {
             guard !loaded else { return }
-            guard let urlString, urlString.hasPrefix("data:") else {
-                NSLog("[DataImageView] url is nil or not data URL: \(urlString?.prefix(40) ?? "nil")")
+            guard let urlString else { loaded = true; return }
+
+            if urlString.hasPrefix("data:") {
+                let img = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                    guard let commaIdx = urlString.firstIndex(of: ",") else { return nil }
+                    let b64 = String(urlString[urlString.index(after: commaIdx)...])
+                    guard let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) else { return nil }
+                    return UIImage(data: data)
+                }.value
+                uiImage = img
                 loaded = true
                 return
             }
-            NSLog("[DataImageView] decoding data URL, length=\(urlString.count)")
-            let img = await Task.detached(priority: .userInitiated) { () -> UIImage? in
-                guard let commaIdx = urlString.firstIndex(of: ",") else { return nil }
-                let b64 = String(urlString[urlString.index(after: commaIdx)...])
-                guard let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) else {
-                    NSLog("[DataImageView] base64 decode failed, b64 length=\(b64.count)")
-                    return nil
+
+            if urlString.hasPrefix("http"), let url = URL(string: urlString) {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    uiImage = UIImage(data: data)
+                } catch {
+                    NSLog("[DataImageView] http load failed: \(error)")
                 }
-                let img = UIImage(data: data)
-                NSLog("[DataImageView] UIImage: \(img != nil ? "ok" : "nil")")
-                return img
-            }.value
-            uiImage = img
+                loaded = true
+                return
+            }
+
             loaded = true
+        }
+    }
+}
+
+// MARK: - Image Preview (fullscreen zoom/pan)
+struct ImagePreviewView: View {
+    let uiImage: UIImage?
+    let onDismiss: () -> Void
+
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            imageView
+                .scaleEffect(scale)
+                .offset(offset)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            scale = max(1.0, min(lastScale * value, 6.0))
+                        }
+                        .onEnded { _ in
+                            lastScale = scale
+                            if scale <= 1.0 {
+                                withAnimation(.spring()) {
+                                    offset = .zero
+                                    lastOffset = .zero
+                                }
+                            }
+                        }
+                )
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { value in
+                            if scale > 1.0 {
+                                offset = CGSize(
+                                    width: lastOffset.width + value.translation.width,
+                                    height: lastOffset.height + value.translation.height
+                                )
+                            }
+                        }
+                        .onEnded { _ in
+                            lastOffset = offset
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring()) {
+                        if scale > 1.0 {
+                            scale = 1.0; lastScale = 1.0
+                            offset = .zero; lastOffset = .zero
+                        } else {
+                            scale = 2.5; lastScale = 2.5
+                        }
+                    }
+                }
+                .onTapGesture { onDismiss() }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white, .black.opacity(0.4))
+                    }
+                    .padding()
+                }
+                Spacer()
+            }
+        }
+        .statusBarHidden()
+    }
+
+    @ViewBuilder
+    private var imageView: some View {
+        if let img = uiImage {
+            Image(uiImage: img).resizable().scaledToFit()
         }
     }
 }

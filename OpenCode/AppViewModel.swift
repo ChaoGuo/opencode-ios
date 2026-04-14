@@ -294,17 +294,16 @@ final class AppViewModel {
               let msgIdx = list.firstIndex(where: { $0.info.id == delta.messageID }) else { return }
 
         var env = list[msgIdx]
-        if let pi = env.parts.firstIndex(where: { $0.partID == delta.partID }) {
-            // Append delta to the named field
-            if delta.field == "text" {
-                env.parts[pi].text = (env.parts[pi].text ?? "") + delta.delta
-            }
-        } else {
-            // New part
-            var p = MessagePart(type: "text")
-            p.id = delta.partID
-            if delta.field == "text" { p.text = delta.delta }
-            env.parts.append(p)
+        // Server always emits message.part.updated before any delta for that part,
+        // so the part must already exist. Drop deltas for unknown partIDs rather
+        // than creating a placeholder with the wrong type (e.g. text instead of reasoning).
+        guard let pi = env.parts.firstIndex(where: { $0.partID == delta.partID }) else { return }
+
+        switch delta.field {
+        case "text":
+            env.parts[pi].text = (env.parts[pi].text ?? "") + delta.delta
+        default:
+            return
         }
         list[msgIdx] = env
         envelopes[sid] = list
