@@ -154,6 +154,17 @@ final class AppViewModel {
         }
     }
 
+    func renameSession(id: String, newTitle: String) async {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let updated = try await api.renameSession(id: id, title: trimmed)
+            upsertSession(updated)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func deleteSession(id: String) async {
         do {
             try await api.deleteSession(id: id)

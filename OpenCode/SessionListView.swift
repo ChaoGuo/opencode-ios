@@ -5,6 +5,9 @@ struct SessionListView: View {
     @State private var vm = AppViewModel.shared
     @State private var showingDeleteAlert = false
     @State private var sessionToDelete: String?
+    @State private var showingRenameAlert = false
+    @State private var sessionToRename: String?
+    @State private var renameText = ""
 
     var body: some View {
         List(selection: $selectedSessionID) {
@@ -27,6 +30,15 @@ struct SessionListView: View {
                         }
                     }
                     .tint(.orange)
+                    Button {
+                        sessionToRename = session.id
+                        let current = session.title ?? ""
+                        renameText = current.hasPrefix("New session") ? "" : current
+                        showingRenameAlert = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .tint(.blue)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -85,6 +97,17 @@ struct SessionListView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete this chat session.")
+        }
+        .alert("Rename Chat", isPresented: $showingRenameAlert) {
+            TextField("Title", text: $renameText)
+                .textInputAutocapitalization(.sentences)
+            Button("Save") {
+                if let id = sessionToRename {
+                    let newTitle = renameText
+                    Task { await vm.renameSession(id: id, newTitle: newTitle) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }

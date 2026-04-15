@@ -57,6 +57,13 @@ final class APIService {
         _ = try await session.data(for: req)
     }
 
+    func renameSession(id: String, title: String) async throws -> Session {
+        let body = try JSONEncoder().encode(["title": title])
+        let req = try makeRequest("/session/\(id)", method: "PATCH", body: body)
+        let (data, _) = try await session.data(for: req)
+        return try decoder.decode(Session.self, from: data)
+    }
+
     // MARK: - Messages
     /// Returns array of MessageEnvelope: [{ info, parts }]
     func getMessages(sessionID: String) async throws -> [MessageEnvelope] {
