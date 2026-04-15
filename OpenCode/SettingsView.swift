@@ -65,6 +65,29 @@ struct SettingsView: View {
                     }
                 }
 
+                #if os(iOS)
+                Section {
+                    Toggle("New message alerts", isOn: Binding(
+                        get: { settings.notificationsEnabled },
+                        set: { newValue in
+                            settings.notificationsEnabled = newValue
+                            if newValue {
+                                Task {
+                                    let granted = await NotificationService.shared.requestAuthorizationIfNeeded()
+                                    if !granted {
+                                        settings.notificationsEnabled = false
+                                    }
+                                }
+                            }
+                        }
+                    ))
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Alert me when the assistant finishes replying while the app is in the background. iOS decides how often to wake the app — typically every 15+ minutes, not realtime.")
+                }
+                #endif
+
                 Section("About") {
                     LabeledContent("Version", value: "1.0.0")
                     Link("OpenCode on GitHub", destination: URL(string: "https://github.com/opencode-ai/opencode")!)

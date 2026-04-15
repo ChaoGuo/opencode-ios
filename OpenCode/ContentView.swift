@@ -4,6 +4,11 @@ struct ContentView: View {
     @State private var vm = AppViewModel.shared
     @State private var selectedSessionID: String?
     @State private var columnVisibility = NavigationSplitViewVisibility.automatic
+    @Binding var pendingSessionID: String?
+
+    init(pendingSessionID: Binding<String?> = .constant(nil)) {
+        self._pendingSessionID = pendingSessionID
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -21,6 +26,11 @@ struct ContentView: View {
         }
         .task {
             await vm.start()
+        }
+        .onChange(of: pendingSessionID) { _, newValue in
+            guard let sid = newValue else { return }
+            selectedSessionID = sid
+            pendingSessionID = nil
         }
         .alert("Error", isPresented: Binding(
             get: { vm.errorMessage != nil },

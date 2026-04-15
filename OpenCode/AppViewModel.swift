@@ -85,6 +85,7 @@ final class AppViewModel {
         do {
             let list = try await api.getMessages(sessionID: sessionID)
             envelopes[sessionID] = list
+            markLatestAssistantSeen(sessionID: sessionID, list: list)
         } catch {
             if !isCancellation(error) {
                 errorMessage = error.localizedDescription
@@ -92,6 +93,19 @@ final class AppViewModel {
             print("loadMessages error: \(error)")
         }
         loadingMessages[sessionID] = false
+    }
+
+    /// Keep the background-refresh cursor in sync with what the user has
+    /// actually seen, so we don't re-notify them about it later.
+    private func markLatestAssistantSeen(sessionID: String, list: [MessageEnvelope]) {
+        #if os(iOS)
+        let latest = list
+            .filter { $0.info.role == .assistant && $0.info.time.completed != nil }
+            .max { $0.info.time.created < $1.info.time.created }
+        if let id = latest?.info.id {
+            BackgroundRefreshService.shared.markSeen(sessionID: sessionID, messageID: id)
+        }
+        #endif
     }
 
     // MARK: - Session Actions
