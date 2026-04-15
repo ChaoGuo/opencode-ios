@@ -37,3 +37,6 @@ fastlane/test_output
 # macOS
 .DS_Store
 *.swp
+
+# Claude Code
+.claude/
