@@ -19,12 +19,17 @@ final class AppViewModel {
     var showSettings = false
     var isLoadingInitial = true
     var errorMessage: String?
+    var pinnedSessionIDs: Set<String> = []
 
     private let api = APIService.shared
     private let sse = SSEService.shared
     private let decoder = JSONDecoder()
+    private let pinnedDefaultsKey = "pinnedSessionIDs"
 
     private init() {
+        if let stored = UserDefaults.standard.array(forKey: pinnedDefaultsKey) as? [String] {
+            pinnedSessionIDs = Set(stored)
+        }
         sse.onConnected = { [weak self] connected in
             self?.sseConnected = connected
         }
@@ -63,8 +68,27 @@ final class AppViewModel {
         s.time?.updated ?? s.time?.created ?? 0
     }
 
+    func isPinned(_ sessionID: String) -> Bool {
+        pinnedSessionIDs.contains(sessionID)
+    }
+
+    func togglePin(_ sessionID: String) {
+        if pinnedSessionIDs.contains(sessionID) {
+            pinnedSessionIDs.remove(sessionID)
+        } else {
+            pinnedSessionIDs.insert(sessionID)
+        }
+        UserDefaults.standard.set(Array(pinnedSessionIDs), forKey: pinnedDefaultsKey)
+        sortSessionsByRecency()
+    }
+
     private func sortSessionsByRecency() {
-        sessions.sort { recencyKey($0) > recencyKey($1) }
+        sessions.sort {
+            let p0 = pinnedSessionIDs.contains($0.id)
+            let p1 = pinnedSessionIDs.contains($1.id)
+            if p0 != p1 { return p0 }
+            return recencyKey($0) > recencyKey($1)
+        }
     }
 
     func loadModels() async {
@@ -135,6 +159,9 @@ final class AppViewModel {
             try await api.deleteSession(id: id)
             sessions.removeAll { $0.id == id }
             envelopes.removeValue(forKey: id)
+            if pinnedSessionIDs.remove(id) != nil {
+                UserDefaults.standard.set(Array(pinnedSessionIDs), forKey: pinnedDefaultsKey)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

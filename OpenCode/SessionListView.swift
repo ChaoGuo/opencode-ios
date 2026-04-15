@@ -10,7 +10,23 @@ struct SessionListView: View {
         List(selection: $selectedSessionID) {
             ForEach(vm.sessions) { session in
                 NavigationLink(value: session.id) {
-                    SessionRow(session: session, isGenerating: vm.generatingSessions.contains(session.id))
+                    SessionRow(
+                        session: session,
+                        isGenerating: vm.generatingSessions.contains(session.id),
+                        isPinned: vm.isPinned(session.id)
+                    )
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        vm.togglePin(session.id)
+                    } label: {
+                        if vm.isPinned(session.id) {
+                            Label("Unpin", systemImage: "pin.slash.fill")
+                        } else {
+                            Label("Pin", systemImage: "pin.fill")
+                        }
+                    }
+                    .tint(.orange)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -77,6 +93,7 @@ struct SessionListView: View {
 struct SessionRow: View {
     let session: Session
     let isGenerating: Bool
+    let isPinned: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -95,9 +112,16 @@ struct SessionRow: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
-                    .font(.body)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(session.displayTitle)
+                        .font(.body)
+                        .lineLimit(1)
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
                 if let time = session.time {
                     Text(Date(timeIntervalSince1970: (time.updated ?? time.created) / 1000).formatted(.relative(presentation: .named)))
                         .font(.caption)
