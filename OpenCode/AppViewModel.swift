@@ -52,10 +52,19 @@ final class AppViewModel {
     func loadSessions() async {
         do {
             let list = try await api.getSessions()
-            sessions = list.sorted { ($0.time?.created ?? 0) > ($1.time?.created ?? 0) }
+            sessions = list
+            sortSessionsByRecency()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func recencyKey(_ s: Session) -> Double {
+        s.time?.updated ?? s.time?.created ?? 0
+    }
+
+    private func sortSessionsByRecency() {
+        sessions.sort { recencyKey($0) > recencyKey($1) }
     }
 
     func loadModels() async {
@@ -260,8 +269,23 @@ final class AppViewModel {
         if let i = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[i] = session
         } else {
-            sessions.insert(session, at: 0)
+            sessions.append(session)
         }
+        sortSessionsByRecency()
+    }
+
+    private func bumpSessionActivity(_ sessionID: String, to timestamp: Double) {
+        guard let i = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        var s = sessions[i]
+        let current = s.time?.updated ?? s.time?.created ?? 0
+        guard timestamp > current else { return }
+        if s.time != nil {
+            s.time?.updated = timestamp
+        } else {
+            s.time = Session.SessionTime(created: timestamp, updated: timestamp)
+        }
+        sessions[i] = s
+        sortSessionsByRecency()
     }
 
     private func upsertMessageInfo(_ info: MessageInfo) {
@@ -279,6 +303,7 @@ final class AppViewModel {
             list.append(MessageEnvelope(info: info, parts: []))
         }
         envelopes[sid] = list
+        bumpSessionActivity(sid, to: info.time.completed ?? info.time.created)
     }
 
     private func upsertPart(_ part: PartWithContext) {
