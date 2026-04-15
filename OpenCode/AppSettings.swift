@@ -20,6 +20,9 @@ final class AppSettings {
     var recentModelIDs: [String] = [] {
         didSet { UserDefaults.standard.set(recentModelIDs, forKey: Keys.recentModels) }
     }
+    var notificationsEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(notificationsEnabled, forKey: Keys.notifications) }
+    }
 
     private enum Keys {
         static let baseURL = "opencode_baseUrl"
@@ -27,6 +30,7 @@ final class AppSettings {
         static let password = "opencode_password"
         static let model = "opencode_model"
         static let recentModels = "opencode_recentModels"
+        static let notifications = "opencode_notificationsEnabled"
     }
 
     private init() {
@@ -41,6 +45,10 @@ final class AppSettings {
             recent.insert(modelID, at: 0)
         }
         recentModelIDs = recent
+        // Default ON; fall back to the stored flag if the user flipped it before.
+        if UserDefaults.standard.object(forKey: Keys.notifications) != nil {
+            notificationsEnabled = UserDefaults.standard.bool(forKey: Keys.notifications)
+        }
     }
 
     func recordRecentModel(_ id: String) {

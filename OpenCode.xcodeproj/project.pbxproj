@@ -23,6 +23,9 @@
 		B200001D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B200000D /* Assets.xcassets */; };
 		B200001E /* VoiceRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F /* VoiceRecorderService.swift */; };
 		B200001F /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010 /* AudioPlayerService.swift */; };
+		B2000071 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000070 /* NotificationService.swift */; };
+		B2000073 /* MessageCursorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000072 /* MessageCursorStore.swift */; };
+		B2000075 /* BackgroundRefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000074 /* BackgroundRefreshService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +45,10 @@
 		B200000E /* OpenCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B200000F /* VoiceRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorderService.swift; sourceTree = "<group>"; };
 		B2000010 /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
+		B2000070 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		B2000072 /* MessageCursorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCursorStore.swift; sourceTree = "<group>"; };
+		B2000074 /* BackgroundRefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshService.swift; sourceTree = "<group>"; };
+		B2000076 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +96,10 @@
 				B200000C /* SettingsView.swift */,
 				B200000F /* VoiceRecorderService.swift */,
 				B2000010 /* AudioPlayerService.swift */,
+				B2000070 /* NotificationService.swift */,
+				B2000072 /* MessageCursorStore.swift */,
+				B2000074 /* BackgroundRefreshService.swift */,
+				B2000076 /* Info.plist */,
 				B200000D /* Assets.xcassets */,
 			);
 			path = OpenCode;
@@ -180,6 +191,9 @@
 				B200001C /* SettingsView.swift in Sources */,
 				B200001E /* VoiceRecorderService.swift in Sources */,
 				B200001F /* AudioPlayerService.swift in Sources */,
+				B2000071 /* NotificationService.swift in Sources */,
+				B2000073 /* MessageCursorStore.swift in Sources */,
+				B2000075 /* BackgroundRefreshService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -310,13 +324,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8NXH68D7YR;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要麦克风权限以录制语音消息";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenCode/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -339,13 +348,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8NXH68D7YR;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要麦克风权限以录制语音消息";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenCode/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
