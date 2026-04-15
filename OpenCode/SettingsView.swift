@@ -12,6 +12,12 @@ struct SettingsView: View {
     @State private var username = ""
     @State private var password = ""
 
+    // Cleanup state
+    @State private var cleanupDays = 10
+    @State private var showingCleanupAlert = false
+    @State private var cleanupInProgress = false
+    @State private var cleanupResult: String?
+
     var body: some View {
         NavigationStack {
             Form {
@@ -88,6 +94,32 @@ struct SettingsView: View {
                 }
                 #endif
 
+                Section {
+                    Stepper(value: $cleanupDays, in: 1...365) {
+                        Text("Older than \(cleanupDays) days")
+                    }
+                    Button(role: .destructive) {
+                        showingCleanupAlert = true
+                    } label: {
+                        HStack {
+                            Text("Clean up old chats")
+                            Spacer()
+                            if cleanupInProgress {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(cleanupInProgress)
+                } header: {
+                    Text("Cleanup")
+                } footer: {
+                    if let cleanupResult {
+                        Text(cleanupResult).foregroundStyle(.secondary)
+                    } else {
+                        Text("Delete chats last updated more than N days ago. Pinned chats are kept.")
+                    }
+                }
+
                 Section("About") {
                     LabeledContent("Version", value: "1.0.0")
                     Link("OpenCode on GitHub", destination: URL(string: "https://github.com/opencode-ai/opencode")!)
@@ -109,7 +141,30 @@ struct SettingsView: View {
                 username = settings.username
                 password = settings.password
             }
+            .alert("Clean up old chats?", isPresented: $showingCleanupAlert) {
+                Button("Delete", role: .destructive) {
+                    Task { await runCleanup() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let count = vm.sessionsOlderThan(days: cleanupDays).count
+                if count == 0 {
+                    Text("No chats older than \(cleanupDays) days.")
+                } else {
+                    Text("This will permanently delete \(count) chat\(count == 1 ? "" : "s") older than \(cleanupDays) days. Pinned chats are kept.")
+                }
+            }
         }
+    }
+
+    private func runCleanup() async {
+        cleanupInProgress = true
+        cleanupResult = nil
+        let deleted = await vm.cleanupSessions(olderThanDays: cleanupDays)
+        cleanupInProgress = false
+        cleanupResult = deleted == 0
+            ? "No chats to delete."
+            : "Deleted \(deleted) chat\(deleted == 1 ? "" : "s")."
     }
 
     private func saveAndDismiss() {

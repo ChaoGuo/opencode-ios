@@ -178,6 +178,57 @@ final class AppViewModel {
         }
     }
 
+    /// Sessions older than the cutoff, excluding pinned ones.
+    /// `time` is stored as milliseconds since epoch.
+    func sessionsOlderThan(days: Int) -> [Session] {
+        let cutoffMs = (Date().timeIntervalSince1970 - Double(days) * 86_400) * 1000
+        return sessions.filter { s in
+            guard !pinnedSessionIDs.contains(s.id) else { return false }
+            let ts = s.time?.updated ?? s.time?.created ?? 0
+            return ts > 0 && ts < cutoffMs
+        }
+    }
+
+    /// Batch delete sessions older than N days (skipping pinned). Returns the
+    /// number successfully deleted. Uses bounded concurrency to avoid hammering
+    /// the server.
+    func cleanupSessions(olderThanDays days: Int) async -> Int {
+        let victims = sessionsOlderThan(days: days)
+        guard !victims.isEmpty else { return 0 }
+
+        let ids = victims.map(\.id)
+        let api = self.api
+        let maxConcurrency = 5
+        var deleted = 0
+
+        await withTaskGroup(of: String?.self) { group in
+            var iterator = ids.makeIterator()
+            func addNext() {
+                guard let id = iterator.next() else { return }
+                group.addTask {
+                    do {
+                        try await api.deleteSession(id: id)
+                        return id
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            for _ in 0..<min(maxConcurrency, ids.count) { addNext() }
+            while let result = await group.next() {
+                if result != nil { deleted += 1 }
+                addNext()
+            }
+        }
+
+        // SSE session.deleted will also prune, but be defensive so UI updates
+        // immediately even if the stream is lagging.
+        let deletedIDs = Set(ids)
+        sessions.removeAll { deletedIDs.contains($0.id) }
+        for id in deletedIDs { envelopes.removeValue(forKey: id) }
+        return deleted
+    }
+
     // MARK: - Message Actions
     func sendMessage(sessionID: String, text: String, image: UIImage? = nil) async {
         generatingSessions.insert(sessionID)
