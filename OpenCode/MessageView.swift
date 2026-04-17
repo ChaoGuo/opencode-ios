@@ -138,7 +138,7 @@ struct PartView: View {
         case "text":
             if let text = part.text, !text.isEmpty {
                 if isStreaming {
-                    StreamingTextView(text: text)
+                    StreamingMarkdownView(text: text)
                 } else {
                     MarkdownTextView(text: text)
                 }
@@ -176,18 +176,140 @@ struct MarkdownTextView: View {
     }
 }
 
-// Plain-text renderer used during streaming to avoid re-parsing the full
-// markdown AST on every delta — MarkdownUI is O(n) per update and blocks the
-// main thread for long replies, which previously caused ChatView to blank.
-struct StreamingTextView: View {
+// Streaming renderer. MarkdownUI re-parses the whole AST on every delta and
+// blocks the main thread for long replies, so we use Foundation's native
+// AttributedString markdown parser (inline-only, preserves whitespace) plus a
+// fenced-code-block splitter that reuses CodeBlockView. Tradeoff: block-level
+// constructs (headings, lists, tables) stay as literal text until the message
+// completes and switches to MarkdownUI — those are the only things that pop.
+struct StreamingMarkdownView: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 16))
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(StreamingMarkdown.split(text).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .text(let content):
+                    StreamingInlineText(raw: content)
+                case .code(let lang, let content):
+                    CodeBlockView(language: lang, code: content)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StreamingInlineText: View {
+    let raw: String
+
+    var body: some View {
+        // Pathologically long streaming text: skip the parse, fall back to
+        // plain Text. 50k chars is well past any realistic inline segment.
+        if raw.count > 50_000 {
+            Text(raw)
+                .font(.system(size: 16))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        } else {
+            Text(StreamingMarkdown.parseInline(raw))
+                .font(.system(size: 16))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+enum StreamingMarkdownSegment {
+    case text(String)
+    case code(language: String?, content: String)
+}
+
+enum StreamingMarkdown {
+    static func parseInline(_ raw: String) -> AttributedString {
+        let balanced = balanceTrailingInline(raw)
+        let options = AttributedString.MarkdownParsingOptions(
+            allowsExtendedAttributes: false,
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        if let attr = try? AttributedString(markdown: balanced, options: options) {
+            return attr
+        }
+        return AttributedString(raw)
+    }
+
+    // Splits on ``` fences so in-progress code blocks render with the same
+    // framed CodeBlockView as the completed state — no raw backticks on screen.
+    // A trailing unclosed fence is treated as a still-streaming code segment.
+    static func split(_ text: String) -> [StreamingMarkdownSegment] {
+        var segments: [StreamingMarkdownSegment] = []
+        let lines = text.components(separatedBy: "\n")
+        var i = 0
+        var textBuf: [String] = []
+
+        while i < lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                if !textBuf.isEmpty {
+                    segments.append(.text(textBuf.joined(separator: "\n")))
+                    textBuf.removeAll()
+                }
+                let lang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                i += 1
+                var codeLines: [String] = []
+                while i < lines.count {
+                    if lines[i].trimmingCharacters(in: .whitespaces) == "```" {
+                        i += 1
+                        break
+                    }
+                    codeLines.append(lines[i])
+                    i += 1
+                }
+                segments.append(.code(
+                    language: lang.isEmpty ? nil : lang,
+                    content: codeLines.joined(separator: "\n")
+                ))
+            } else {
+                textBuf.append(lines[i])
+                i += 1
+            }
+        }
+        if !textBuf.isEmpty {
+            segments.append(.text(textBuf.joined(separator: "\n")))
+        }
+        return segments
+    }
+
+    // Appends a matching closer for an unclosed trailing ** or ` so the word
+    // being typed renders bold / monospace immediately instead of flickering
+    // as the delimiter characters arrive. Best-effort: assumes the unmatched
+    // opener is at the end, which is the overwhelming common case.
+    static func balanceTrailingInline(_ text: String) -> String {
+        let doubleStar = text.components(separatedBy: "**").count - 1
+        let backtick = text.filter { $0 == "`" }.count
+
+        let needsStar = doubleStar % 2 == 1
+        let needsTick = backtick % 2 == 1
+
+        if !needsStar && !needsTick { return text }
+
+        // Markdown requires the closer to sit against non-whitespace, so insert
+        // it before any trailing whitespace rather than at endIndex.
+        var end = text.endIndex
+        while end > text.startIndex, text[text.index(before: end)].isWhitespace {
+            end = text.index(before: end)
+        }
+
+        var closer = ""
+        if needsTick { closer += "`" }
+        if needsStar { closer += "**" }
+
+        var result = text
+        result.insert(contentsOf: closer, at: end)
+        return result
     }
 }
 
