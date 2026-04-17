@@ -9,8 +9,25 @@ import UserNotifications
 final class NotificationService: NSObject {
     static let shared = NotificationService()
 
-    /// Action the user wants triggered when they tap a notification.
-    var onOpenSession: ((String) -> Void)?
+    /// Action the user wants triggered when they tap a notification. When the
+    /// subscriber registers after a tap has already been delivered (the
+    /// cold-launch case — see `pendingSessionID` below), the buffered sid is
+    /// flushed immediately via this handler's `didSet`.
+    var onOpenSession: ((String) -> Void)? {
+        didSet {
+            if let handler = onOpenSession, let sid = pendingSessionID {
+                pendingSessionID = nil
+                handler(sid)
+            }
+        }
+    }
+
+    /// Sid captured from a tap that arrived before `onOpenSession` was
+    /// registered. Typical cause: cold-launch from a notification — UN
+    /// delivers `didReceive response` before SwiftUI's root `.task` runs,
+    /// so without this buffer the sid would be silently dropped and the
+    /// user would land on the welcome screen instead of the chat.
+    private var pendingSessionID: String?
 
     private let center = UNUserNotificationCenter.current()
     private let sessionIDKey = "sessionID"
@@ -77,7 +94,12 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         let sid = response.notification.request.content.userInfo["sessionID"] as? String
         await MainActor.run { [weak self] in
             guard let self, let sid else { return }
-            self.onOpenSession?(sid)
+            if let handler = self.onOpenSession {
+                handler(sid)
+            } else {
+                // Buffer until a subscriber registers (cold-launch race).
+                self.pendingSessionID = sid
+            }
         }
     }
 }
