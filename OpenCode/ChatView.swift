@@ -9,7 +9,6 @@ struct ChatView: View {
     @State private var inputText = ""
     @State private var showModelPicker = false
     @FocusState private var inputFocused: Bool
-    @State private var scrollProxy: ScrollViewProxy?
     #if os(iOS)
     @State private var voiceRecorder = VoiceRecorderService.shared
     @State private var isRecording = false
@@ -33,8 +32,13 @@ struct ChatView: View {
                     } else if envelopes.isEmpty && !isGenerating {
                         EmptyChatView(sessionID: sessionID)
                     } else {
-                        ForEach(envelopes, id: \.info.id) { envelope in
-                            MessageView(envelope: envelope)
+                        ForEach(chatRows(envelopes)) { row in
+                            switch row {
+                            case .timeDivider(_, let text):
+                                TimeDividerView(text: text)
+                            case .message(let envelope):
+                                MessageView(envelope: envelope)
+                            }
                         }
                         if isGenerating {
                             HStack {
@@ -52,11 +56,15 @@ struct ChatView: View {
                 }
                 .padding(.top, 8)
             }
+            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onAppear { scrollProxy = proxy }
-            .onChange(of: envelopes.count) { scrollToBottom() }
-            .onChange(of: isGenerating) { if isGenerating { scrollToBottom() } }
-            .onChange(of: inputFocused) { if inputFocused { scrollToBottom() } }
+            .onChange(of: envelopes.count) { scrollToBottom(proxy) }
+            .onChange(of: isGenerating) { if isGenerating { scrollToBottom(proxy) } }
+            .onChange(of: inputFocused) { if inputFocused { scrollToBottom(proxy) } }
+            .task(id: sessionID) {
+                await vm.loadMessages(for: sessionID)
+                await settleBottom(proxy)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
@@ -71,9 +79,27 @@ struct ChatView: View {
         .sheet(isPresented: $showModelPicker) {
             ModelPickerView()
         }
-        .task {
-            await vm.loadMessages(for: sessionID)
-            scrollToBottom()
+    }
+
+    /// Single-shot scroll to bottom; used by onChange handlers where the
+    /// content has already settled (new message appended, focus gained, etc.).
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo("bottom", anchor: .bottom)
+    }
+
+    /// Multi-frame retry after async `loadMessages` — LazyVStack measures
+    /// items lazily and MarkdownUI / code blocks / tool-call cells can change
+    /// their rendered height after first layout. We keep nudging the scroll
+    /// to the bottom over ~500ms so each retry uses the progressively more
+    /// accurate content size. This is the fix for sessions with many messages
+    /// and heavy content where the initial scroll lands on a stale height
+    /// estimate and leaves the viewport above the true bottom.
+    private func settleBottom(_ proxy: ScrollViewProxy) async {
+        for delayMs in [0, 50, 120, 220, 350, 500] {
+            if delayMs > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+            }
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
 
@@ -251,16 +277,85 @@ struct ChatView: View {
         #endif
     }
 
-    private func scrollToBottom() {
-        // Skip animation while streaming — queued animations can interact badly
-        // with rapid LazyVStack content growth and cause the view to blank.
-        if isGenerating {
-            scrollProxy?.scrollTo("bottom", anchor: .bottom)
-        } else {
-            withAnimation(.easeOut(duration: 0.2)) {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+    // MARK: - Time divider logic
+
+    private func chatRows(_ envelopes: [MessageEnvelope]) -> [ChatRow] {
+        // iMessage-style: always show divider above first message, then again
+        // whenever the gap to the previous message exceeds the threshold.
+        let gapThresholdMs: Double = 10 * 60 * 1000
+        var rows: [ChatRow] = []
+        var prevTimeMs: Double? = nil
+        for env in envelopes {
+            let t = env.info.time.created
+            let showDivider = prevTimeMs.map { t - $0 >= gapThresholdMs } ?? true
+            if showDivider {
+                rows.append(.timeDivider(id: env.info.id, text: ChatView.formatDividerTime(t)))
             }
+            rows.append(.message(env))
+            prevTimeMs = t
         }
+        return rows
+    }
+
+    private static func formatDividerTime(_ ms: Double) -> String {
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        let cal = Calendar.current
+        let now = Date()
+        let time = timeFormatter.string(from: date)
+        if cal.isDateInToday(date) { return "今天 \(time)" }
+        if cal.isDateInYesterday(date) { return "昨天 \(time)" }
+        if let days = cal.dateComponents([.day], from: date, to: now).day, days < 7 {
+            return "\(weekdayFormatter.string(from: date)) \(time)"
+        }
+        if cal.isDate(date, equalTo: now, toGranularity: .year) {
+            return shortDateFormatter.string(from: date)
+        }
+        return fullDateFormatter.string(from: date)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE"
+        f.locale = Locale(identifier: "zh_CN")
+        return f
+    }()
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 HH:mm"
+        return f
+    }()
+    private static let fullDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f
+    }()
+}
+
+private enum ChatRow: Identifiable {
+    case timeDivider(id: String, text: String)
+    case message(MessageEnvelope)
+
+    var id: String {
+        switch self {
+        case .timeDivider(let id, _): return "div:\(id)"
+        case .message(let env): return env.info.id
+        }
+    }
+}
+
+private struct TimeDividerView: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
     }
 }
 
