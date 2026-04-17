@@ -94,6 +94,7 @@ struct AssistantMessageView: View {
     @State private var showCopied = false
 
     var body: some View {
+        let isStreaming = envelope.info.time.completed == nil
         HStack(alignment: .top, spacing: 10) {
             // Avatar
             ZStack {
@@ -107,7 +108,7 @@ struct AssistantMessageView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(envelope.parts, id: \.partID) { part in
-                    PartView(part: part, reasoningExpanded: $reasoningExpanded)
+                    PartView(part: part, isStreaming: isStreaming, reasoningExpanded: $reasoningExpanded)
                 }
 
                 if let info = envelope.info as MessageInfo?,
@@ -124,6 +125,7 @@ struct AssistantMessageView: View {
 // MARK: - Part dispatcher
 struct PartView: View {
     let part: MessagePart
+    let isStreaming: Bool
     @Binding var reasoningExpanded: Bool
 
     var body: some View {
@@ -135,7 +137,11 @@ struct PartView: View {
         switch part.type {
         case "text":
             if let text = part.text, !text.isEmpty {
-                MarkdownTextView(text: text)
+                if isStreaming {
+                    StreamingTextView(text: text)
+                } else {
+                    MarkdownTextView(text: text)
+                }
             }
         case "reasoning":
             // reasoning parts use the "text" field too
@@ -167,6 +173,21 @@ struct MarkdownTextView: View {
             .markdownBlockStyle(\.codeBlock) { config in
                 CodeBlockView(language: config.language, code: config.content)
             }
+    }
+}
+
+// Plain-text renderer used during streaming to avoid re-parsing the full
+// markdown AST on every delta — MarkdownUI is O(n) per update and blocks the
+// main thread for long replies, which previously caused ChatView to blank.
+struct StreamingTextView: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 16))
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
     }
 }
 

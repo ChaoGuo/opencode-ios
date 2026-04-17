@@ -26,6 +26,14 @@ final class AppViewModel {
     private let decoder = JSONDecoder()
     private let pinnedDefaultsKey = "pinnedSessionIDs"
 
+    // Coalesce message.part.delta events within a 50ms window so we don't
+    // reassign envelopes[sid] dozens of times per second — rapid reassignment
+    // + MarkdownUI re-parse was causing ChatView to blank on long replies.
+    // Key: "sid|mid|pid"
+    private var pendingDeltas: [String: String] = [:]
+    private var flushScheduled = false
+    private let flushInterval: TimeInterval = 0.05
+
     private init() {
         if let stored = UserDefaults.standard.array(forKey: pinnedDefaultsKey) as? [String] {
             pinnedSessionIDs = Set(stored)
@@ -263,6 +271,7 @@ final class AppViewModel {
     }
 
     func abort(sessionID: String) async {
+        flushPendingDeltas()
         try? await api.abortSession(id: sessionID)
     }
 
@@ -342,6 +351,7 @@ final class AppViewModel {
             }
         case "session.idle":
             if let props = try? decoder.decode(SessionIdleProperties.self, from: propsData) {
+                flushPendingDeltas()
                 generatingSessions.remove(props.sessionID)
             }
         case "session.status":
@@ -378,6 +388,9 @@ final class AppViewModel {
     }
 
     private func upsertMessageInfo(_ info: MessageInfo) {
+        // Apply any buffered deltas first so a terminal-state update doesn't
+        // race past an accumulated-but-unflushed tail.
+        flushPendingDeltas()
         let sid = info.sessionID
         var list = envelopes[sid] ?? []
         if let i = list.firstIndex(where: { $0.info.id == info.id }) {
@@ -396,6 +409,10 @@ final class AppViewModel {
     }
 
     private func upsertPart(_ part: PartWithContext) {
+        // Apply any buffered deltas first. Critical: the terminal
+        // message.part.updated carries full text — if a late delta flushed
+        // after it, we'd double-append the tail.
+        flushPendingDeltas()
         let sid = part.sessionID
         let mid = part.messageID
         guard var list = envelopes[sid],
@@ -417,23 +434,54 @@ final class AppViewModel {
     }
 
     private func applyPartDelta(_ delta: PartDeltaProperties) {
-        let sid = delta.sessionID
-        guard var list = envelopes[sid],
-              let msgIdx = list.firstIndex(where: { $0.info.id == delta.messageID }) else { return }
+        guard delta.field == "text" else { return }
+        let key = "\(delta.sessionID)|\(delta.messageID)|\(delta.partID)"
+        pendingDeltas[key, default: ""] += delta.delta
+        scheduleDeltaFlush()
+    }
 
-        var env = list[msgIdx]
-        // Server always emits message.part.updated before any delta for that part,
-        // so the part must already exist. Drop deltas for unknown partIDs rather
-        // than creating a placeholder with the wrong type (e.g. text instead of reasoning).
-        guard let pi = env.parts.firstIndex(where: { $0.partID == delta.partID }) else { return }
-
-        switch delta.field {
-        case "text":
-            env.parts[pi].text = (env.parts[pi].text ?? "") + delta.delta
-        default:
-            return
+    private func scheduleDeltaFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + flushInterval) { [weak self] in
+            self?.flushPendingDeltas()
         }
-        list[msgIdx] = env
-        envelopes[sid] = list
+    }
+
+    /// Apply all buffered deltas. Grouped by session so each session's
+    /// envelope array is reassigned at most once, minimising SwiftUI diffs.
+    /// Must be called before any path that mutates envelopes/parts directly,
+    /// so late deltas don't overwrite server-provided terminal state.
+    private func flushPendingDeltas() {
+        flushScheduled = false
+        guard !pendingDeltas.isEmpty else { return }
+
+        // Group by sessionID: [sid: [(mid, pid, accumulated)]]
+        var grouped: [String: [(String, String, String)]] = [:]
+        for (key, accumulated) in pendingDeltas {
+            let parts = key.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { continue }
+            let sid = String(parts[0])
+            let mid = String(parts[1])
+            let pid = String(parts[2])
+            grouped[sid, default: []].append((mid, pid, accumulated))
+        }
+        pendingDeltas.removeAll(keepingCapacity: true)
+
+        for (sid, entries) in grouped {
+            guard var list = envelopes[sid] else { continue }
+            var changed = false
+            for (mid, pid, accumulated) in entries {
+                guard let msgIdx = list.firstIndex(where: { $0.info.id == mid }) else { continue }
+                var env = list[msgIdx]
+                // Server emits message.part.updated before any delta for that part,
+                // so the part must already exist. Drop deltas for unknown partIDs.
+                guard let pi = env.parts.firstIndex(where: { $0.partID == pid }) else { continue }
+                env.parts[pi].text = (env.parts[pi].text ?? "") + accumulated
+                list[msgIdx] = env
+                changed = true
+            }
+            if changed { envelopes[sid] = list }
+        }
     }
 }

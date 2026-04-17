@@ -35,7 +35,6 @@ struct ChatView: View {
                     } else {
                         ForEach(envelopes, id: \.info.id) { envelope in
                             MessageView(envelope: envelope)
-                                .id(envelope.info.id)
                         }
                         if isGenerating {
                             HStack {
@@ -53,7 +52,6 @@ struct ChatView: View {
                 }
                 .padding(.top, 8)
             }
-            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onAppear { scrollProxy = proxy }
             .onChange(of: envelopes.count) { scrollToBottom() }
@@ -254,8 +252,14 @@ struct ChatView: View {
     }
 
     private func scrollToBottom() {
-        withAnimation(.easeOut(duration: 0.2)) {
+        // Skip animation while streaming — queued animations can interact badly
+        // with rapid LazyVStack content growth and cause the view to blank.
+        if isGenerating {
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            }
         }
     }
 }
