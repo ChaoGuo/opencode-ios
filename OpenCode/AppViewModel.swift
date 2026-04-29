@@ -125,13 +125,37 @@ final class AppViewModel {
         loadingMessages[sessionID] = true
         do {
             let list = try await api.getMessages(sessionID: sessionID)
-            envelopes[sessionID] = list
-            markLatestAssistantSeen(sessionID: sessionID, list: list)
+            // 合并已有的 SSE 数据，避免文件 URL 等字段丢失
+            let existingList = envelopes[sessionID] ?? []
+            var mergedList = list
+            for idx in mergedList.indices {
+                let info = mergedList[idx].info
+                if let existingEnv = existingList.first(where: { $0.info.id == info.id }) {
+                    for partIdx in mergedList[idx].parts.indices {
+                        var part = mergedList[idx].parts[partIdx]
+                        if let existingPart = existingEnv.parts.first(where: {
+                            $0.type == part.type && $0.mime == part.mime && $0.filename == part.filename
+                        }) {
+                            if part.url == nil { part.url = existingPart.url }
+                            if part.text == nil { part.text = existingPart.text }
+                        }
+                        mergedList[idx].parts[partIdx] = part
+                    }
+                }
+            }
+            // Debug: 打印每个 file part 的 url 字段
+            for env in mergedList {
+                for part in env.parts where part.type == "file" {
+                    print("[VM loadMessages] session=\(sessionID) msg=\(env.info.id) type=\(part.type) mime=\(part.mime ?? "nil") url=\(part.url ?? "nil") filename=\(part.filename ?? "nil")")
+                }
+            }
+            envelopes[sessionID] = mergedList
+            markLatestAssistantSeen(sessionID: sessionID, list: mergedList)
         } catch {
             if !isCancellation(error) {
                 errorMessage = error.localizedDescription
+                print("loadMessages error: \(error)")
             }
-            print("loadMessages error: \(error)")
         }
         loadingMessages[sessionID] = false
     }
@@ -255,10 +279,27 @@ final class AppViewModel {
                 let resized = renderer.image { _ in img.draw(in: CGRect(origin: .zero, size: newSize)) }
                 return resized.jpegData(compressionQuality: 0.75)
             }.value
+
+            // 上传到文件系统或回退为 base64 data URL
+            let imageURL: String? = await {
+                guard let data = imageData else { return nil }
+                let fsURL = AppSettings.shared.fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !fsURL.isEmpty {
+                    do {
+                        return try await api.uploadImage(data)
+                    } catch {
+                        print("[VM] File service upload failed: \(error), falling back to base64")
+                    }
+                }
+                let b64 = data.base64EncodedString()
+                print("[VM] Image size: \(data.count / 1024)KB, base64: \(b64.count / 1024)KB")
+                return "data:image/jpeg;base64,\(b64)"
+            }()
+
             try await api.sendMessage(
                 sessionID: sessionID,
                 text: text,
-                imageData: imageData,
+                imageURL: imageURL,
                 providerID: providerID,
                 modelID: modelID
             )

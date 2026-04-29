@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var baseURL = ""
     @State private var username = ""
     @State private var password = ""
+    @State private var fileServiceURL = ""
+    @State private var fileServiceUsername = ""
+    @State private var fileServicePassword = ""
 
     // Cleanup state
     @State private var cleanupDays = 10
@@ -33,6 +36,33 @@ struct SettingsView: View {
                     Text("Server")
                 } footer: {
                     Text("The URL of your OpenCode server. Make sure CORS is enabled if accessing from a different origin.")
+                }
+
+                Section {
+                    LabeledContent("URL") {
+                        TextField("http://localhost:4097", text: $fileServiceURL)
+                            .keyboardType(.URL)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } header: {
+                    Text("File Service")
+                } footer: {
+                    Text("Self-hosted file storage for image and file uploads. If empty, images are sent as base64 inline.")
+                }
+
+                Section("File Service Auth") {
+                    LabeledContent("Username") {
+                        TextField("optional", text: $fileServiceUsername)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Password") {
+                        SecureField("optional", text: $fileServicePassword)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
 
                 Section("Authentication") {
@@ -69,6 +99,21 @@ struct SettingsView: View {
                         Text(result ? "Connection successful" : "Connection failed — check your server URL and credentials")
                             .foregroundStyle(result ? .green : .red)
                     }
+                }
+
+                Section {
+                    Picker("Appearance", selection: Binding(
+                        get: { settings.appearance },
+                        set: { settings.appearance = $0 }
+                    )) {
+                        ForEach(AppearanceMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("System follows your device setting.")
                 }
 
                 #if os(iOS)
@@ -140,6 +185,9 @@ struct SettingsView: View {
                 baseURL = settings.baseURL
                 username = settings.username
                 password = settings.password
+                fileServiceURL = settings.fileServiceURL
+                fileServiceUsername = settings.fileServiceUsername
+                fileServicePassword = settings.fileServicePassword
             }
             .alert("Clean up old chats?", isPresented: $showingCleanupAlert) {
                 Button("Delete", role: .destructive) {
@@ -171,6 +219,9 @@ struct SettingsView: View {
         settings.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.password = password
+        settings.fileServiceURL = fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.fileServiceUsername = fileServiceUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.fileServicePassword = fileServicePassword
         vm.reconnect()
         dismiss()
     }

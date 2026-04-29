@@ -2,13 +2,14 @@ import Foundation
 
 enum APIError: LocalizedError {
     case invalidURL
-    case httpError(Int)
+    case httpError(Int, String? = nil)
     case decodingError(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid server URL"
-        case .httpError(let c): return "Server returned HTTP \(c)"
+        case .httpError(let c, let detail):
+            return detail ?? "Server returned HTTP \(c)"
         case .decodingError(let m): return "Decode error: \(m)"
         }
     }
@@ -78,7 +79,7 @@ final class APIService {
         }
     }
 
-    func sendMessage(sessionID: String, text: String, imageData: Data?,
+    func sendMessage(sessionID: String, text: String, imageURL: String?,
                      providerID: String?, modelID: String?) async throws {
         struct TextPart: Encodable { let type = "text"; let text: String }
         struct FilePart: Encodable {
@@ -92,15 +93,13 @@ final class APIService {
             return ModelRef(providerID: p, modelID: m)
         }()
 
-        // 构造 parts（base64 编码在后台完成）
+        // 构造 parts
         let body: Data = try await Task.detached(priority: .userInitiated) {
             var partsData: [[String: String]] = []
-            if let imgData = imageData {
-                let b64 = imgData.base64EncodedString()
-                print("[API] Image size: \(imgData.count / 1024)KB, base64: \(b64.count / 1024)KB")
+            if let imgURL = imageURL {
                 partsData.append(["type": "file", "mime": "image/jpeg",
                                    "filename": "image.jpg",
-                                   "url": "data:image/jpeg;base64,\(b64)"])
+                                   "url": imgURL])
             }
             if !text.isEmpty {
                 partsData.append(["type": "text", "text": text])
@@ -114,12 +113,89 @@ final class APIService {
             return data
         }.value
         var req = try makeRequest("/session/\(sessionID)/prompt_async", method: "POST", body: body)
-        // 图片请求给更长超时
-        if imageData != nil { req.timeoutInterval = 120 }
+        // 带图片的请求给更长超时
+        if imageURL != nil { req.timeoutInterval = 120 }
         print("[API] Sending prompt_async...")
         let (_, resp) = try await session.data(for: req)
         let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? -1
         print("[API] prompt_async response: HTTP \(statusCode)")
+    }
+
+    // MARK: - File Service
+    /// 本地图片缓存目录，作为文件服务加载失败的后备
+    private static let imageCacheDir: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("opencode-images")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    static func cachedImageData(for urlString: String?) -> Data? {
+        guard let urlString, let key = Self.cacheKey(from: urlString) else { return nil }
+        let fileURL = imageCacheDir.appendingPathComponent(key)
+        return try? Data(contentsOf: fileURL)
+    }
+
+    private static func cacheKey(from urlString: String) -> String? {
+        guard let range = urlString.range(of: "/file/") else { return nil }
+        return String(urlString[range.upperBound...])
+    }
+
+    func uploadImage(_ imageData: Data, filename: String = "image.jpg", mime: String = "image/jpeg") async throws -> String {
+        let baseURL = settings.fileServiceURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(baseURL)/file/upload") else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = UUID().uuidString
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let auth = settings.fileServiceAuthHeader {
+            req.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+
+        var body = Data()
+        body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+
+        let (data, resp) = try await session.data(for: req)
+        let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        guard statusCode == 200 else {
+            let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(statusCode, bodyStr)
+        }
+
+        struct UploadResponse: Decodable {
+            let id: String
+            let url: String
+            let filename: String
+            let mime: String
+            let size: Int
+        }
+
+        let uploadResp = try decoder.decode(UploadResponse.self, from: data)
+        // 服务端可能返回绝对 URL（http(s)://...）或以 / 开头的相对路径，
+        // 仅在相对路径时拼接 baseURL，避免出现 "http://host:portohttp://..." 这种损坏 URL。
+        let returnedURL = uploadResp.url
+        let fullURL: String
+        if returnedURL.hasPrefix("http://") || returnedURL.hasPrefix("https://") {
+            fullURL = returnedURL
+        } else {
+            let path = returnedURL.hasPrefix("/") ? returnedURL : "/\(returnedURL)"
+            fullURL = "\(baseURL)\(path)"
+        }
+        // 保存到本地缓存作为后备
+        if let key = Self.cacheKey(from: fullURL) {
+            let cacheFile = Self.imageCacheDir.appendingPathComponent(key)
+            try? imageData.write(to: cacheFile)
+        }
+        print("[API] Image uploaded to file service: \(fullURL)")
+        return fullURL
     }
 
     func sendAudioMessage(sessionID: String, audioData: Data, filename: String,

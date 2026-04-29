@@ -590,11 +590,24 @@ struct DataImageView: View {
             }
 
             if urlString.hasPrefix("http"), let url = URL(string: urlString) {
-                do {
-                    let (data, _) = try await URLSession.shared.data(from: url)
+                let data: Data? = await Task.detached(priority: .userInitiated) { () -> Data? in
+                    do {
+                        let (data, _) = try await URLSession.shared.data(from: url)
+                        print("[DataImageView] http load success: \(url.absoluteString.prefix(80))...")
+                        return data
+                    } catch {
+                        NSLog("[DataImageView] http load failed for \(url.absoluteString.prefix(80)): \(error)")
+                        return nil
+                    }
+                }.value
+                if Task.isCancelled { return }
+                if let data {
                     uiImage = UIImage(data: data)
-                } catch {
-                    NSLog("[DataImageView] http load failed: \(error)")
+                } else if let cached = APIService.cachedImageData(for: urlString) {
+                    uiImage = UIImage(data: cached)
+                    print("[DataImageView] fallback cache hit")
+                } else {
+                    print("[DataImageView] fallback cache miss")
                 }
                 loaded = true
                 return

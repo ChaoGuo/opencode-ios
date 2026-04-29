@@ -12,6 +12,7 @@ struct OpenCodeApp: App {
 
     /// Set from a notification tap; ContentView reads it to switch sessions.
     @State private var pendingSessionID: String?
+    @State private var settings = AppSettings.shared
 
     init() {
         #if os(iOS)
@@ -22,6 +23,7 @@ struct OpenCodeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(pendingSessionID: $pendingSessionID)
+                .preferredColorScheme(settings.appearance.colorScheme)
                 #if os(iOS)
                 .task {
                     NotificationService.shared.onOpenSession = { sid in
