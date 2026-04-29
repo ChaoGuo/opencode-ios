@@ -81,10 +81,6 @@ final class APIService {
 
     func sendMessage(sessionID: String, text: String, imageURL: String?,
                      providerID: String?, modelID: String?) async throws {
-        struct TextPart: Encodable { let type = "text"; let text: String }
-        struct FilePart: Encodable {
-            let type = "file"; let mime: String; let filename: String; let url: String
-        }
         struct ModelRef: Encodable { let providerID: String; let modelID: String }
 
         let modelRef: ModelRef? = {
@@ -93,16 +89,23 @@ final class APIService {
             return ModelRef(providerID: p, modelID: m)
         }()
 
-        // 构造 parts
+        // 构造 parts。
+        // file service 公网 URL → 拼到文本末尾，避开下游 provider 不接受 URL 图片的问题（Kimi 等只吃 base64）。
+        // base64 data: URL → 仍以 file part 走，opencode 对 data: 协议有特殊处理直传模型。
         let body: Data = try await Task.detached(priority: .userInitiated) {
             var partsData: [[String: String]] = []
+            var combinedText = text
             if let imgURL = imageURL {
-                partsData.append(["type": "file", "mime": "image/jpeg",
-                                   "filename": "image.jpg",
-                                   "url": imgURL])
+                if imgURL.hasPrefix("data:") {
+                    partsData.append(["type": "file", "mime": "image/jpeg",
+                                       "filename": "image.jpg",
+                                       "url": imgURL])
+                } else {
+                    combinedText = combinedText.isEmpty ? imgURL : "\(combinedText)\n\(imgURL)"
+                }
             }
-            if !text.isEmpty {
-                partsData.append(["type": "text", "text": text])
+            if !combinedText.isEmpty {
+                partsData.append(["type": "text", "text": combinedText])
             }
             var bodyDict: [String: Any] = ["parts": partsData]
             if let m = modelRef {

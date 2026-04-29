@@ -44,21 +44,41 @@ struct MessageView: View {
 struct UserMessageView: View {
     let envelope: MessageEnvelope
 
-    private var textContent: String {
+    private var rawText: String {
         envelope.parts.compactMap { p -> String? in
             p.type == "text" ? p.text : nil
         }.joined(separator: "\n")
+    }
+
+    /// 从用户消息文本里抽出由 file service 上传产生的图片 URL，剩余部分作为正文。
+    /// 走文本而非 file part 是为了避开下游 provider（Kimi 等）不接受 URL 图片的限制。
+    private var splitText: (imageURLs: [String], text: String) {
+        let prefix = AppSettings.shared.fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prefix.isEmpty else { return ([], rawText) }
+        var images: [String] = []
+        var lines: [String] = []
+        for line in rawText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(prefix), trimmed.contains("/file/") {
+                images.append(trimmed)
+            } else {
+                lines.append(line)
+            }
+        }
+        return (images, lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private var audioPart: MessagePart? {
         envelope.parts.first { $0.type == "file" && $0.mime?.hasPrefix("audio/") == true }
     }
 
-    private var imageParts: [MessagePart] {
+    /// 老消息里以 file part 形式存储的图片，保留兼容渲染。
+    private var legacyImageParts: [MessagePart] {
         envelope.parts.filter { $0.type == "file" && $0.mime?.hasPrefix("image/") == true }
     }
 
     var body: some View {
+        let split = splitText
         HStack(alignment: .top) {
             Spacer(minLength: 60)
             if let audio = audioPart {
@@ -67,13 +87,18 @@ struct UserMessageView: View {
                 #endif
             } else {
                 VStack(alignment: .trailing, spacing: 6) {
-                    ForEach(imageParts, id: \.partID) { part in
+                    ForEach(legacyImageParts, id: \.partID) { part in
                         DataImageView(urlString: part.url)
                             .frame(maxWidth: 220, maxHeight: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    if !textContent.isEmpty {
-                        Text(textContent)
+                    ForEach(split.imageURLs, id: \.self) { url in
+                        DataImageView(urlString: url)
+                            .frame(maxWidth: 220, maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    if !split.text.isEmpty {
+                        Text(split.text)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Color.accentColor)
