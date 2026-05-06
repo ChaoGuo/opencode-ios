@@ -50,22 +50,30 @@ struct UserMessageView: View {
         }.joined(separator: "\n")
     }
 
-    /// 从用户消息文本里抽出由 file service 上传产生的图片 URL，剩余部分作为正文。
+    /// 从用户消息文本里抽出由 file service 上传产生的图片/语音 URL，剩余部分作为正文。
     /// 走文本而非 file part 是为了避开下游 provider（Kimi 等）不接受 URL 图片的限制。
-    private var splitText: (imageURLs: [String], text: String) {
+    /// 语音消息约定：`[语音 5s] http://.../file/voice_5s_xxx.m4a`
+    private var splitText: (imageURLs: [String], audioURLs: [String], text: String) {
         let prefix = AppSettings.shared.fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prefix.isEmpty else { return ([], rawText) }
+        guard !prefix.isEmpty else { return ([], [], rawText) }
         var images: [String] = []
+        var audios: [String] = []
         var lines: [String] = []
         for line in rawText.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // 行里包含音频 URL（可能带 "[语音 Xs] " 前缀）
+            if let audioURL = trimmed.range(of: "\(NSRegularExpression.escapedPattern(for: prefix))/file/[^\\s]+\\.m4a", options: .regularExpression).map({ String(trimmed[$0]) }) {
+                audios.append(audioURL)
+                continue
+            }
+            // 整行是 file service URL → 视作图片附件（老格式）
             if trimmed.hasPrefix(prefix), trimmed.contains("/file/") {
                 images.append(trimmed)
-            } else {
-                lines.append(line)
+                continue
             }
+            lines.append(line)
         }
-        return (images, lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
+        return (images, audios, lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private var audioPart: MessagePart? {
@@ -82,6 +90,7 @@ struct UserMessageView: View {
         HStack(alignment: .top) {
             Spacer(minLength: 60)
             if let audio = audioPart {
+                // 老消息：file part 形式的音频（base64 内联），保留兼容播放
                 #if os(iOS)
                 AudioBubbleView(part: audio)
                 #endif
@@ -97,6 +106,11 @@ struct UserMessageView: View {
                             .frame(maxWidth: 220, maxHeight: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
+                    #if os(iOS)
+                    ForEach(split.audioURLs, id: \.self) { url in
+                        VoiceMessageView(audioURL: url)
+                    }
+                    #endif
                     if !split.text.isEmpty {
                         Text(split.text)
                             .padding(.horizontal, 14)
@@ -628,7 +642,7 @@ struct DataImageView: View {
                 if Task.isCancelled { return }
                 if let data {
                     uiImage = UIImage(data: data)
-                } else if let cached = APIService.cachedImageData(for: urlString) {
+                } else if let cached = APIService.cachedFileData(for: urlString) {
                     uiImage = UIImage(data: cached)
                     print("[DataImageView] fallback cache hit")
                 } else {
@@ -827,6 +841,135 @@ struct AudioBubbleView: View {
 
     private func barHeight(index: Int) -> CGFloat {
         // 中间高两侧低，模拟波形
+        let heights: [CGFloat] = [10, 16, 22, 18, 26, 20, 14, 24, 18, 12, 22, 16, 20, 14, 18, 10]
+        return heights[index % heights.count]
+    }
+}
+
+// MARK: - Voice Message (URL-based, with on-demand transcription)
+struct VoiceMessageView: View {
+    let audioURL: String
+    @State private var audioPlayer = AudioPlayerService.shared
+    @State private var transcriptStore = TranscriptStore.shared
+
+    private var filename: String {
+        URL(string: audioURL)?.lastPathComponent ?? "voice.m4a"
+    }
+
+    private var duration: Int {
+        let base = (filename as NSString).deletingPathExtension
+        for tok in base.components(separatedBy: "_") {
+            if tok.hasSuffix("s"), let n = Int(tok.dropLast()) { return n }
+        }
+        return 0
+    }
+
+    private var isPlaying: Bool {
+        audioPlayer.playingFilename == filename && audioPlayer.isPlaying
+    }
+
+    private var bubbleWidth: CGFloat {
+        min(120 + CGFloat(duration) * 8, 220)
+    }
+
+    private var barCount: Int { max(4, min(duration + 3, 16)) }
+
+    private var transcriptState: TranscriptState {
+        transcriptStore.state(for: audioURL)
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            audioBubble
+            transcriptArea
+        }
+    }
+
+    private var audioBubble: some View {
+        Button {
+            audioPlayer.play(url: audioURL, filename: filename)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 20)
+                HStack(spacing: 2) {
+                    ForEach(0..<barCount, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 2)
+                            .frame(width: 3, height: barHeight(index: i))
+                            .opacity(isPlaying ? 1.0 : 0.7)
+                    }
+                }
+                .animation(isPlaying ? .easeInOut(duration: 0.4).repeatForever() : .default, value: isPlaying)
+                Spacer(minLength: 0)
+                Text(duration > 0 ? "\(duration)\"" : "")
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(width: bubbleWidth)
+            .background(Color.accentColor)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var transcriptArea: some View {
+        switch transcriptState {
+        case .idle:
+            Button {
+                Task { await transcriptStore.transcribe(audioURL: audioURL) }
+            } label: {
+                Label("转文字", systemImage: "text.bubble")
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(.secondarySystemBackground))
+                    .foregroundStyle(.secondary)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        case .streaming(let t):
+            HStack(alignment: .top, spacing: 6) {
+                ProgressView().scaleEffect(0.7)
+                Text(t.isEmpty ? "识别中…" : t)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: 260, alignment: .trailing)
+        case .final(let t):
+            Text(t)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(maxWidth: 260, alignment: .trailing)
+                .textSelection(.enabled)
+                .multilineTextAlignment(.leading)
+        case .failed(let m):
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                Text(m).font(.caption).foregroundStyle(.red)
+                Button("重试") {
+                    Task { await transcriptStore.transcribe(audioURL: audioURL) }
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private func barHeight(index: Int) -> CGFloat {
         let heights: [CGFloat] = [10, 16, 22, 18, 26, 20, 14, 24, 18, 12, 22, 16, 20, 14, 18, 10]
         return heights[index % heights.count]
     }

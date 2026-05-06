@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var fileServiceURL = ""
     @State private var fileServiceUsername = ""
     @State private var fileServicePassword = ""
+    @State private var sttServiceURL = ""
 
     // Cleanup state
     @State private var cleanupDays = 10
@@ -63,6 +64,20 @@ struct SettingsView: View {
                         SecureField("optional", text: $fileServicePassword)
                             .multilineTextAlignment(.trailing)
                     }
+                }
+
+                Section {
+                    LabeledContent("URL") {
+                        TextField("http://localhost:8766", text: $sttServiceURL)
+                            .keyboardType(.URL)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } header: {
+                    Text("Speech-to-Text Service")
+                } footer: {
+                    Text("Endpoint for the 转文字 button on voice messages. Reuses File Service auth.")
                 }
 
                 Section("Authentication") {
@@ -188,6 +203,7 @@ struct SettingsView: View {
                 fileServiceURL = settings.fileServiceURL
                 fileServiceUsername = settings.fileServiceUsername
                 fileServicePassword = settings.fileServicePassword
+                sttServiceURL = settings.sttServiceURL
             }
             .alert("Clean up old chats?", isPresented: $showingCleanupAlert) {
                 Button("Delete", role: .destructive) {
@@ -222,6 +238,7 @@ struct SettingsView: View {
         settings.fileServiceURL = fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.fileServiceUsername = fileServiceUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.fileServicePassword = fileServicePassword
+        settings.sttServiceURL = sttServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         vm.reconnect()
         dismiss()
     }

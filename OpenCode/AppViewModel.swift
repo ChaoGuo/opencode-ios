@@ -323,21 +323,27 @@ final class AppViewModel {
             let model = availableModels.first { $0.id == selectedID }
             let providerID = model?.providerID
             let modelID = model?.id
-            // 把时长编入文件名，方便显示：voice_5s_1234567890.m4a
+            // 把时长编入文件名，方便显示和后续解析：voice_5s_1234567890.m4a
             let seconds = max(1, Int(duration.rounded()))
             let filename = "voice_\(seconds)s_\(Int(Date().timeIntervalSince1970)).m4a"
-            // 在后台线程读取文件
             let data = try await Task.detached(priority: .userInitiated) {
                 try Data(contentsOf: fileURL)
             }.value
-            // 缓存到本地，用于播放
             #if os(iOS)
             AudioPlayerService.shared.cacheAudio(data: data, filename: filename)
             #endif
-            try await api.sendAudioMessage(
+            // 必须有 file service 才能发语音（不再 base64 内联，避免 prompt 体积爆炸）
+            let fsURL = AppSettings.shared.fileServiceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !fsURL.isEmpty else {
+                throw APIError.httpError(0, "需要先在设置里配置 File Service URL 才能发送语音消息")
+            }
+            let audioURL = try await api.uploadAudio(data, filename: filename)
+            // 嵌入 user 文本里：MCP 工具读到 [语音 ...] 提示和 URL，会主动调 transcribe_audio
+            let text = "[语音 \(seconds)s] \(audioURL)"
+            try await api.sendMessage(
                 sessionID: sessionID,
-                audioData: data,
-                filename: filename,
+                text: text,
+                imageURL: nil,
                 providerID: providerID,
                 modelID: modelID
             )

@@ -125,18 +125,23 @@ final class APIService {
     }
 
     // MARK: - File Service
-    /// 本地图片缓存目录，作为文件服务加载失败的后备
-    private static let imageCacheDir: URL = {
+    /// 本地文件缓存目录，作为文件服务加载失败的后备（图片 + 语音）
+    private static let fileCacheDir: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("opencode-images")
+            .appendingPathComponent("opencode-files")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
 
-    static func cachedImageData(for urlString: String?) -> Data? {
+    static func cachedFileData(for urlString: String?) -> Data? {
         guard let urlString, let key = Self.cacheKey(from: urlString) else { return nil }
-        let fileURL = imageCacheDir.appendingPathComponent(key)
+        let fileURL = fileCacheDir.appendingPathComponent(key)
         return try? Data(contentsOf: fileURL)
+    }
+
+    static func cacheFile(_ data: Data, urlString: String) {
+        guard let key = Self.cacheKey(from: urlString) else { return }
+        try? data.write(to: fileCacheDir.appendingPathComponent(key))
     }
 
     private static func cacheKey(from urlString: String) -> String? {
@@ -144,7 +149,15 @@ final class APIService {
         return String(urlString[range.upperBound...])
     }
 
-    func uploadImage(_ imageData: Data, filename: String = "image.jpg", mime: String = "image/jpeg") async throws -> String {
+    func uploadImage(_ imageData: Data) async throws -> String {
+        try await uploadFile(imageData, filename: "image.jpg", mime: "image/jpeg")
+    }
+
+    func uploadAudio(_ audioData: Data, filename: String) async throws -> String {
+        try await uploadFile(audioData, filename: filename, mime: "audio/m4a")
+    }
+
+    func uploadFile(_ fileData: Data, filename: String, mime: String) async throws -> String {
         let baseURL = settings.fileServiceURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(baseURL)/file/upload") else {
             throw APIError.invalidURL
@@ -162,7 +175,7 @@ final class APIService {
         body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
-        body.append(imageData)
+        body.append(fileData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
@@ -193,37 +206,9 @@ final class APIService {
             fullURL = "\(baseURL)\(path)"
         }
         // 保存到本地缓存作为后备
-        if let key = Self.cacheKey(from: fullURL) {
-            let cacheFile = Self.imageCacheDir.appendingPathComponent(key)
-            try? imageData.write(to: cacheFile)
-        }
-        print("[API] Image uploaded to file service: \(fullURL)")
+        Self.cacheFile(fileData, urlString: fullURL)
+        print("[API] File uploaded (\(mime), \(fileData.count / 1024)KB) -> \(fullURL)")
         return fullURL
-    }
-
-    func sendAudioMessage(sessionID: String, audioData: Data, filename: String,
-                          providerID: String?, modelID: String?) async throws {
-        struct FilePart: Encodable {
-            let type = "file"
-            let mime = "audio/m4a"
-            let filename: String
-            let url: String
-        }
-        struct Model: Encodable { let providerID: String; let modelID: String }
-        struct Body: Encodable {
-            let parts: [FilePart]
-            let model: Model?
-        }
-        let dataURL = "data:audio/m4a;base64," + audioData.base64EncodedString()
-        let model: Model? = {
-            guard let p = providerID, let m = modelID, !p.isEmpty, !m.isEmpty
-            else { return nil }
-            return Model(providerID: p, modelID: m)
-        }()
-        let body = Body(parts: [FilePart(filename: filename, url: dataURL)], model: model)
-        let req = try makeRequest("/session/\(sessionID)/prompt_async", method: "POST",
-                                   body: try JSONEncoder().encode(body))
-        _ = try await session.data(for: req)
     }
 
     func abortSession(id: String) async throws {

@@ -26,6 +26,7 @@
 		B2000071 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000070 /* NotificationService.swift */; };
 		B2000073 /* MessageCursorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000072 /* MessageCursorStore.swift */; };
 		B2000075 /* BackgroundRefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000074 /* BackgroundRefreshService.swift */; };
+		B2000081 /* STTService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000080 /* STTService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +50,7 @@
 		B2000072 /* MessageCursorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageCursorStore.swift; sourceTree = "<group>"; };
 		B2000074 /* BackgroundRefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshService.swift; sourceTree = "<group>"; };
 		B2000076 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B2000080 /* STTService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STTService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +101,7 @@
 				B2000070 /* NotificationService.swift */,
 				B2000072 /* MessageCursorStore.swift */,
 				B2000074 /* BackgroundRefreshService.swift */,
+				B2000080 /* STTService.swift */,
 				B2000076 /* Info.plist */,
 				B200000D /* Assets.xcassets */,
 			);
@@ -194,6 +197,7 @@
 				B2000071 /* NotificationService.swift in Sources */,
 				B2000073 /* MessageCursorStore.swift in Sources */,
 				B2000075 /* BackgroundRefreshService.swift in Sources */,
+				B2000081 /* STTService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

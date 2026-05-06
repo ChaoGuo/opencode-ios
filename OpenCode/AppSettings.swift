@@ -54,6 +54,9 @@ final class AppSettings {
     var fileServicePassword: String = "" {
         didSet { UserDefaults.standard.set(fileServicePassword, forKey: Keys.fileServicePassword) }
     }
+    var sttServiceURL: String = "" {
+        didSet { UserDefaults.standard.set(sttServiceURL, forKey: Keys.sttServiceURL) }
+    }
     var notificationsEnabled: Bool = true {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: Keys.notifications) }
     }
@@ -70,6 +73,7 @@ final class AppSettings {
         static let fileServiceURL = "opencode_fileServiceURL"
         static let fileServiceUsername = "opencode_fileServiceUsername"
         static let fileServicePassword = "opencode_fileServicePassword"
+        static let sttServiceURL = "opencode_sttServiceURL"
         static let notifications = "opencode_notificationsEnabled"
         static let appearance = "opencode_appearance"
     }
@@ -82,6 +86,7 @@ final class AppSettings {
         fileServiceURL = UserDefaults.standard.string(forKey: Keys.fileServiceURL) ?? "http://localhost:4097"
         fileServiceUsername = UserDefaults.standard.string(forKey: Keys.fileServiceUsername) ?? ""
         fileServicePassword = UserDefaults.standard.string(forKey: Keys.fileServicePassword) ?? ""
+        sttServiceURL = UserDefaults.standard.string(forKey: Keys.sttServiceURL) ?? ""
         selectedModelID = modelID
         var recent = UserDefaults.standard.stringArray(forKey: Keys.recentModels) ?? []
         // 确保当前选中的模型在 Recent 里
